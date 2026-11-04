@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shorten a link</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #E8EDF1;
+    --ink: #17202A;
+    --tape: #FFD23F;
+    --ok: #0B6B4F;
+    --bad: #B3261E;
+    --soft: #5B6773;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 56px 20px 96px; }
+
+  h1 {
+    margin: 0 0 12px;
+    font-size: clamp(2.1rem, 7vw, 3.4rem);
+    line-height: 1.02;
+    font-weight: 800;
+    font-variation-settings: "wdth" 125;
+    letter-spacing: -0.01em;
+  }
+  .lede { margin: 0 0 32px; color: var(--soft); max-width: 46ch; }
+
+  h2 {
+    margin: 0 0 12px;
+    font-size: 1.35rem;
+    font-weight: 700;
+    font-variation-settings: "wdth" 110;
+  }
+
+  form { display: flex; gap: 8px; }
+  input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 14px;
+    font: inherit;
+    color: var(--ink);
+    background: #fff;
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+  }
+  input::placeholder { color: #8A95A0; }
+  button {
+    font: inherit;
+    font-weight: 700;
+    padding: 14px 20px;
+    color: var(--paper);
+    background: var(--ink);
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--tape); color: var(--ink); }
+  button:disabled { opacity: .55; cursor: wait; }
+  button.quiet { background: transparent; color: var(--ink); padding: 8px 14px; }
+  button.quiet:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+  .msg { margin: 12px 0 0; min-height: 1.5em; font-weight: 600; }
+  .msg.bad { color: var(--bad); }
+
+  .result {
+    margin-top: 20px;
+    padding: 18px 18px 16px;
+    background: var(--tape);
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+  }
+  .result[hidden], .stats[hidden] { display: none; }
+  .original {
+    margin: 0 0 6px;
+    font-size: .9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .short {
+    display: block;
+    margin-bottom: 14px;
+    font-size: clamp(1.25rem, 4.5vw, 1.75rem);
+    font-weight: 800;
+    font-variation-settings: "wdth" 110;
+    color: var(--ink);
+    word-break: break-all;
+  }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button { background: var(--ink); color: var(--paper); }
+  .actions button.quiet { background: transparent; color: var(--ink); }
+  .actions button:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
+
+  hr { border: 0; border-top: 2px solid var(--ink); margin: 56px 0 32px; }
+
+  .total { margin: 24px 0 4px; font-size: 3rem; font-weight: 800; font-variation-settings: "wdth" 125; line-height: 1; }
+  .total small { font-size: 1rem; font-weight: 500; color: var(--soft); font-variation-settings: "wdth" 100; margin-left: 6px; }
+  .target { margin: 0 0 24px; color: var(--soft); font-size: .9rem; overflow-wrap: anywhere; }
+
+  h3 { margin: 24px 0 8px; font-size: 1rem; font-weight: 700; }
+  .rows { display: grid; gap: 6px; }
+  .row { display: grid; grid-template-columns: 7.5em 1fr 3em; gap: 10px; align-items: center; font-size: .92rem; }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .bar { height: 12px; background: #fff; border: 2px solid var(--ink); border-radius: 3px; }
+  .row .bar i { display: block; height: 100%; background: var(--ink); }
+  .row .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .refs .row { grid-template-columns: 1fr 3em; }
+  .empty { color: var(--soft); margin: 0; }
+
+  @media (max-width: 480px) {
+    form { flex-direction: column; }
+    .row { grid-template-columns: 6em 1fr 2.5em; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Paste a long link. Get a short one.</h1>
+  <p class="lede">Short links redirect to the original and count every click, so you can see where visitors come from.</p>
+
+  <form id="shorten-form" novalidate>
+    <input type="text" id="url" placeholder="https://example.com/a/very/long/page" aria-label="Link to shorten" autocomplete="off" inputmode="url">
+    <button type="submit" id="shorten-btn">Shorten</button>
+  </form>
+  <p class="msg" id="shorten-msg" role="status" aria-live="polite"></p>
+
+  <section class="result" id="result" hidden>
+    <p class="original" id="original"></p>
+    <a class="short" id="short" target="_blank" rel="noopener"></a>
+    <div class="actions">
+      <button type="button" id="copy">Copy link</button>
+      <button type="button" class="quiet" id="see-clicks">See clicks</button>
+    </div>
+  </section>
+
+  <hr>
+
+  <h2>Check a link's clicks</h2>
+  <form id="stats-form" novalidate>
+    <input type="text" id="code" placeholder="Short code or full short link" aria-label="Short code or short link" autocomplete="off">
+    <button type="submit" id="stats-btn">Look up</button>
+  </form>
+  <p class="msg" id="stats-msg" role="status" aria-live="polite"></p>
+
+  <section class="stats" id="stats" hidden>
+    <p class="total"><span id="total">0</span><small>total clicks</small></p>
+    <p class="target" id="target"></p>
+    <h3>Clicks per day</h3>
+    <div class="rows" id="days"></div>
+    <h3>Where clicks came from</h3>
+    <div class="rows refs" id="refs"></div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function setMsg(el, text, bad) {
+    el.textContent = text || "";
+    el.classList.toggle("bad", !!bad);
+  }
+
+  // ---- shorten ----
+  $("shorten-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("shorten-msg");
+    let url = $("url").value.trim();
+    $("result").hidden = true;
+    if (!url) { setMsg(msg, "Enter a link to shorten.", true); return; }
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = "https://" + url;
+
+    const btn = $("shorten-btn");
+    btn.disabled = true;
+    setMsg(msg, "Shortening…");
+    try {
+      const res = await fetch("/shorten", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (res.status === 422) { setMsg(msg, "That doesn't look like a valid link. Check it and try again.", true); return; }
+      if (res.status === 429) { setMsg(msg, "Too many links in a short time. Wait a minute and try again.", true); return; }
+      if (!res.ok) { setMsg(msg, "Something went wrong on the server. Try again.", true); return; }
+      const data = await res.json();
+      $("original").textContent = url;
+      $("short").textContent = data.short_url;
+      $("short").href = data.short_url;
+      $("result").dataset.code = data.code;
+      $("result").hidden = false;
+      $("copy").textContent = "Copy link";
+      setMsg(msg, "");
+    } catch (err) {
+      setMsg(msg, "Couldn't reach the server. Check your connection.", true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("short").textContent);
+      $("copy").textContent = "Copied";
+    } catch (err) {
+      setMsg($("shorten-msg"), "Couldn't copy automatically. Select the link and copy it.", true);
+    }
+  });
+
+  $("see-clicks").addEventListener("click", () => {
+    $("code").value = $("result").dataset.code;
+    loadStats($("result").dataset.code);
+    $("stats-form").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+
+  // ---- stats ----
+  function extractCode(raw) {
+    return raw.trim().split(/[?#]/)[0].replace(/\/+$/, "").split("/").pop();
+  }
+
+  function row(name, count, max) {
+    const r = document.createElement("div");
+    r.className = "row";
+    const a = document.createElement("span");
+    a.className = "name"; a.textContent = name; a.title = name;
+    r.appendChild(a);
+    if (max) {
+      const bar = document.createElement("span");
+      bar.className = "bar";
+      const fill = document.createElement("i");
+      fill.style.width = Math.max(4, (count / max) * 100) + "%";
+      bar.appendChild(fill);
+      r.appendChild(bar);
+    }
+    const n = document.createElement("span");
+    n.className = "n"; n.textContent = count;
+    r.appendChild(n);
+    return r;
+  }
+
+  function fill(container, items, nameKey, max) {
+    container.replaceChildren();
+    if (!items.length) {
+      const p = document.createElement("p");
+      p.className = "empty"; p.textContent = "No clicks yet.";
+      container.appendChild(p);
+      return;
+    }
+    items.forEach((it) => container.appendChild(row(it[nameKey], it.clicks, max)));
+  }
+
+  async function loadStats(code) {
+    const msg = $("stats-msg");
+    $("stats").hidden = true;
+    if (!code) { setMsg(msg, "Enter a short code or link.", true); return; }
+    const btn = $("stats-btn");
+    btn.disabled = true;
+    setMsg(msg, "Loading…");
+    try {
+      const res = await fetch("/stats/" + encodeURIComponent(code));
+      if (res.status === 404) { setMsg(msg, "No link found with that code.", true); return; }
+      if (!res.ok) { setMsg(msg, "Something went wrong on the server. Try again.", true); return; }
+      const d = await res.json();
+      $("total").textContent = d.total_clicks;
+      $("target").textContent = "Goes to " + d.long_url;
+      const dayMax = Math.max(0, ...d.clicks_by_day.map((x) => x.clicks));
+      fill($("days"), d.clicks_by_day, "day", dayMax);
+      fill($("refs"), d.top_referrers, "source", 0);
+      $("stats").hidden = false;
+      setMsg(msg, "");
+    } catch (err) {
+      setMsg(msg, "Couldn't reach the server. Check your connection.", true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $("stats-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    loadStats(extractCode($("code").value));
+  });
+</script>
+</body>
+</html>
