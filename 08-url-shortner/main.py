@@ -9,21 +9,33 @@ import time
 from collections import defaultdict
 import sqlite3
 import re
+from contextlib import asynccontextmanager
+from fastapi.responses import FileResponse
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 CODE_RE = re.compile(r"^[0-9a-zA-Z]{1,10}$")
 
 class ShortenRequest(BaseModel):
     url: HttpUrl
 
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()   # leftmost = original client
+    return request.client.host if request.client else "unknown"
+
 WINDOW_SECONDS = 60
 MAX_REQUESTS = 10
 hits = defaultdict(list)   # ip -> list of timestamps
 
 def rate_limit(request: Request):
-    ip = request.client.host
+    ip = client_ip(request)
     now = time.time()
     hits[ip] = [t for t in hits[ip] if now - t < WINDOW_SECONDS]
     if len(hits[ip]) >= MAX_REQUESTS:
@@ -31,13 +43,17 @@ def rate_limit(request: Request):
     hits[ip].append(now)
 
 
+@app.get("/")
+def index():
+    return FileResponse("index.html")
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
 @app.post("/shorten", dependencies=[Depends(rate_limit)])
-def shorten(body: ShortenRequest, db=Depends(get_db)):
+def shorten(body: ShortenRequest, request: Request, db=Depends(get_db)):
     cur = db.execute(
         "INSERT INTO urls (code, long_url) VALUES (?, ?)",
         ("pending", str(body.url)),
@@ -46,30 +62,27 @@ def shorten(body: ShortenRequest, db=Depends(get_db)):
     code = encode(url_id)
     db.execute("UPDATE urls SET code = ? WHERE id = ?", (code, url_id))
     db.commit()
-    return {"code": code, "short_url": f"http://127.0.0.1:8000/{code}"}
+    return {"code": code, "short_url": str(request.base_url).rstrip("/") + "/" + code}
+
 
 @app.get("/{code}")
 def redirect(code: str, request: Request, db=Depends(get_db)):
-    print(type(db))
     if not CODE_RE.match(code):
         raise HTTPException(status_code=404, detail="Not found")
-    
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute(
-            "SELECT id, long_url FROM urls WHERE code = ?", (code,)
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Short link not found")
-        conn.execute(
-            "INSERT INTO clicks (url_id, referrer, user_agent) VALUES (?, ?, ?)",
-            (row["id"], request.headers.get("referer"), request.headers.get("user-agent")),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+
+    row = db.execute(
+        "SELECT id, long_url FROM urls WHERE code = ?", (code,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Short link not found")
+
+    db.execute(
+        "INSERT INTO clicks (url_id, referrer, user_agent) VALUES (?, ?, ?)",
+        (row["id"], request.headers.get("referer"), request.headers.get("user-agent")),
+    )
+    db.commit()
     return RedirectResponse(row["long_url"], status_code=307)
+
 
 @app.get("/stats/{code}")
 def stats(code: str, db=Depends(get_db)):
